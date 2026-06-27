@@ -16,6 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
+from src.modules.authentication.handlers import router as auth_router
 
 # Configuration Component Registries
 from config import (
@@ -93,6 +94,7 @@ class ApplicationLifecycleManager:
 
         # 4. Instantiate Central Event Demultiplexer Dispatcher Context
         self.dispatcher = Dispatcher(storage=self.storage)
+        self.dispatcher.include_router(auth_router)
 
         # 5. Connect Dynamic Runtime State Infrastructure Triggers
         self.dispatcher.startup.register(self._on_startup_event)
