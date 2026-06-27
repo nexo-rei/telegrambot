@@ -6,6 +6,7 @@ matrices, middleware pipelines, infrastructure hook mappings (PostgreSQL, Redis)
 background job loops, and safe POSIX termination protocols for the application.
 """
 
+from typing import Any
 import asyncio
 import logging
 import signal
