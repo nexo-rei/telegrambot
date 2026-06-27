@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
-from python_dotenv import load_dotenv
+from dotenv import load_dotenv
 
 # Ensure environment variables are seeded from .env before validation execution
 load_dotenv()
