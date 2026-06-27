@@ -1,10 +1,6 @@
-# __init__.py
-"""Configuration module initialization.
-
-Exposes the validated, global settings singleton instance for deterministic
-import paths across the enterprise application lifecycle.
-"""
-
 from config.base import settings
 
-__all__ = ["settings"]
+BOT_TOKEN = settings.bot.BOT_TOKEN
+BOT_USERNAME = settings.bot.BOT_USERNAME
+
+__all__ = ["settings", "BOT_TOKEN", "BOT_USERNAME"]
