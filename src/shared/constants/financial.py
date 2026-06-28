@@ -1,14 +1,12 @@
-# financial.py
 """Shared Financial Invariants Matrix.
 
-Defines the authoritative financial configurations, operational constraints, and transactional 
-boundaries for the investment architecture. Centralizes monetary rules, multi-tier referral scales,
-and validation parameters to ensure data integrity across fiscal calculation engines.
+BUG FIX: `FinancialValidationResult` dataclass used `Optional[str]` for `error_message`
+but `Optional` was never imported from typing.
 """
 
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Final
+from typing import Final, Optional
 
 
 # --- Core Currency Metrics ---
@@ -31,7 +29,7 @@ WALLET_REFRESH_INTERVAL_SECONDS: Final[int] = 15
 # --- Deposit Boundaries ---
 MIN_DEPOSIT_AMOUNT_NGN: Final[float] = 1_000.00
 MAX_DEPOSIT_AMOUNT_NGN: Final[float] = 10_000_000.00
-DEPOSIT_PENDING_TIMEOUT_SECONDS: Final[int] = 7200  # 2 Hours
+DEPOSIT_PENDING_TIMEOUT_SECONDS: Final[int] = 7200   # 2 Hours
 DEPOSIT_VERIFICATION_TIMEOUT_SECONDS: Final[int] = 86400  # 24 Hours
 DEPOSIT_AUTO_EXPIRE_SECONDS: Final[int] = 7200
 DAILY_DEPOSIT_LIMIT_NGN: Final[float] = 20_000_000.00
@@ -94,6 +92,7 @@ class FinancialTransactionType(str, Enum):
 class FinancialValidationResult:
     """Immutable data frame conveying structural outcome traces from validation checks."""
     is_valid: bool
+    # BUG FIX: Optional was used but not imported. Added Optional to imports above.
     error_message: Optional[str] = None
 
 
@@ -103,13 +102,13 @@ def validate_deposit_bounds(amount: float) -> FinancialValidationResult:
     """Validates an inbound deposit amount against strict framework limits."""
     if amount < MIN_DEPOSIT_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount is below the minimum deposit entry barrier of ₦{MIN_DEPOSIT_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount is below the minimum deposit entry barrier of ₦{MIN_DEPOSIT_AMOUNT_NGN:,.2f}.",
         )
     if amount > MAX_DEPOSIT_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount exceeds the maximum permissible single deposit allocation limit of ₦{MAX_DEPOSIT_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount exceeds the maximum permissible single deposit allocation limit of ₦{MAX_DEPOSIT_AMOUNT_NGN:,.2f}.",
         )
     return FinancialValidationResult(is_valid=True)
 
@@ -118,18 +117,18 @@ def validate_withdrawal_bounds(amount: float, available_balance: float) -> Finan
     """Checks an outbound liquidation request against limits and real-time ledger capacities."""
     if amount < MIN_WITHDRAWAL_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount is below the minimum capital extraction baseline of ₦{MIN_WITHDRAWAL_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount is below the minimum capital extraction baseline of ₦{MIN_WITHDRAWAL_AMOUNT_NGN:,.2f}.",
         )
     if amount > MAX_WITHDRAWAL_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount exceeds the maximum single liquidation velocity limit of ₦{MAX_WITHDRAWAL_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount exceeds the maximum single liquidation velocity limit of ₦{MAX_WITHDRAWAL_AMOUNT_NGN:,.2f}.",
         )
     if amount > available_balance:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message="Insufficient available ledger balance to clear this withdrawal order allocation."
+            is_valid=False,
+            error_message="Insufficient available ledger balance to clear this withdrawal order allocation.",
         )
     return FinancialValidationResult(is_valid=True)
 
@@ -138,17 +137,17 @@ def validate_investment_bounds(amount: float, available_balance: float) -> Finan
     """Validates asset acquisition bounds against the global plan distribution matrix."""
     if amount < MIN_INVESTMENT_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount is below the minimum allocation threshold for investment plans of ₦{MIN_INVESTMENT_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount is below the minimum allocation threshold for investment plans of ₦{MIN_INVESTMENT_AMOUNT_NGN:,.2f}.",
         )
     if amount > MAX_INVESTMENT_AMOUNT_NGN:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message=f"Amount exceeds the maximum allocation threshold for investment plans of ₦{MAX_INVESTMENT_AMOUNT_NGN:,.2f}."
+            is_valid=False,
+            error_message=f"Amount exceeds the maximum allocation threshold for investment plans of ₦{MAX_INVESTMENT_AMOUNT_NGN:,.2f}.",
         )
     if amount > available_balance:
         return FinancialValidationResult(
-            is_valid=False, 
-            error_message="Insufficient wallet balance available to fund this capital expansion contract."
+            is_valid=False,
+            error_message="Insufficient wallet balance available to fund this capital expansion contract.",
         )
     return FinancialValidationResult(is_valid=True)
