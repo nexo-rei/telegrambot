@@ -1,5 +1,10 @@
 version: "3.9"
 
+# BUG FIX: env_file was set to `.env` but docker-compose.yml lives in docker/ subdirectory.
+# When running `docker compose -f docker/docker-compose.yml up`, the .env file path
+# must be relative to the project root, not the docker/ directory.
+# Fixed by using `../.env` for all services.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -23,7 +28,11 @@ services:
     image: redis:7-alpine
     container_name: investment_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    # BUG FIX: Added requirepass to enforce auth when REDIS_PASSWORD is set
+    command: >
+      sh -c "if [ -n '$$REDIS_PASSWORD' ]; then redis-server --appendonly yes --requirepass $$REDIS_PASSWORD; else redis-server --appendonly yes; fi"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - redisdata:/data
     healthcheck:
@@ -40,12 +49,16 @@ services:
       dockerfile: docker/bot.Dockerfile
     container_name: investment_bot
     restart: unless-stopped
-    env_file: .env
+    # BUG FIX: Changed `.env` -> `../.env` since compose file is in docker/ subdirectory
+    env_file: ../.env
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    ports:
+      # Expose health check port (matched in bot.Dockerfile HEALTHCHECK)
+      - "8080:8080"
     volumes:
       - ../storage:/app/storage
     networks:
@@ -57,7 +70,7 @@ services:
       dockerfile: docker/worker.Dockerfile
     container_name: investment_worker
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,7 +87,7 @@ services:
       dockerfile: docker/cron.Dockerfile
     container_name: investment_cron
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     depends_on:
       postgres:
         condition: service_healthy
