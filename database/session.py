@@ -9,7 +9,7 @@ fail-safe programmatic rollbacks, and clean dependency injection context targets
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -20,14 +20,24 @@ from database.engine import get_engine
 
 logger = logging.getLogger("investment_platform.database.session")
 
-# 1. Global Thread-Safe Transactional Worker Session Factory
-# Bound lazily to the global active runtime database abstraction engine layer.
-async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=get_engine(),
-    class_=AsyncSession,
-    expire_on_commit=False,  # Disables active entity data eviction on transaction completion
-    autoflush=False,         # Requires explicit checkpoints for operational optimization
-)
+# BUG FIX: The original code called get_engine() at module-level during import,
+# before the engine is initialized and before env vars are loaded.
+# This caused a RuntimeError / crash on import. Replaced with a lazy factory
+# that creates the session maker on first use.
+_async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+
+
+def _get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Lazily initializes and returns the session factory bound to the engine."""
+    global _async_session_factory
+    if _async_session_factory is None:
+        _async_session_factory = async_sessionmaker(
+            bind=get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,  # Disables active entity data eviction on transaction completion
+            autoflush=False,         # Requires explicit checkpoints for operational optimization
+        )
+    return _async_session_factory
 
 
 @asynccontextmanager
@@ -43,13 +53,17 @@ async def session_scope() -> AsyncGenerator[AsyncSession, None]:
     Raises:
         Exception: Re-raises any intercepted exception after asserting rollback state.
     """
-    session: AsyncSession = async_session_factory()
+    factory = _get_session_factory()
+    session: AsyncSession = factory()
     try:
         yield session
         if session.in_transaction():
             await session.commit()
     except Exception as error:
-        logger.error("Exception encountered within transactional session scope. Initializing rollback...", exc_info=True)
+        logger.error(
+            "Exception encountered within transactional session scope. Initializing rollback...",
+            exc_info=True,
+        )
         if session.in_transaction():
             await session.rollback()
         raise error
@@ -83,7 +97,7 @@ async def rollback_session(session: AsyncSession) -> bool:
         if session.in_transaction() or session.is_active:
             await session.rollback()
             return True
-    except exc.SQLAlchemyError as db_error:
+    except exc.SQLAlchemyError:
         logger.error("Failed to cleanly rollback database transaction state.", exc_info=True)
     return False
 
@@ -96,6 +110,5 @@ async def close_session(session: AsyncSession) -> None:
     """
     try:
         await session.close()
-    except exc.SQLAlchemyError as db_error:
+    except exc.SQLAlchemyError:
         logger.error("Error intercepted during explicit connection close sequence.", exc_info=True)
-        
