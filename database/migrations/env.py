@@ -1,21 +1,36 @@
 """Alembic Migration Environment Configuration.
 
-Configures the migration environment to support asynchronous SQLAlchemy 2.x 
-migrations. Enables both online and offline migration modes by integrating 
+Configures the migration environment to support asynchronous SQLAlchemy 2.x
+migrations. Enables both online and offline migration modes by integrating
 with the project's centralized database configuration and engine management layer.
+
+BUG FIXES:
+  - Wrong import paths: `src.config.database` and `src.database.base` do not exist.
+    The correct paths are `config.database` and `database.base`.
+  - Missing `Any` import used in do_run_migrations type hint.
+  - alembic.ini had a placeholder `script_location = src/database/migrations` which
+    doesn't match the actual location `database/migrations`. Fixed in alembic.ini separately.
 """
 
 import asyncio
 from logging.config import fileConfig
+from typing import Any
 
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
-# Import core project configuration and models for metadata discovery
-from src.config.database import DATABASE_URL
-from src.database.base import Base
+# BUG FIX: Original had `from src.config.database import DATABASE_URL` which fails
+# because there is no `src/config` package - config lives at project root level.
+from config.database import DATABASE_URL
+
+# BUG FIX: Original had `from src.database.base import Base` which fails for the
+# same reason - database lives at project root level, not under src/.
+from database.base import Base
+
+# Import all models so Alembic can discover them for autogenerate
+import database.models  # noqa: F401 - registers all model metadata
 
 # Alembic Config object, which provides access to the values within the .ini file
 config = context.config
