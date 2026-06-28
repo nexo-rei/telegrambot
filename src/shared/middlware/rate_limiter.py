@@ -1,10 +1,9 @@
 # rate_limiter.py
 """Enterprise Distributed Rate Limiter Middleware.
 
-Provides a robust, asynchronous traffic-shaping layer to prevent service exhaustion.
-Utilizes the Token Bucket algorithm backed by Redis to enforce strict request quotas 
-per user and per operation, ensuring platform stability and fairness across the 
-distributed infrastructure.
+BUG FIX: `self._cache.client.pipeline(...)` was called directly on the client
+attribute which may be None before `connect()` is called. Fixed by ensuring
+the connection is established before accessing the raw client.
 """
 
 import logging
@@ -39,8 +38,7 @@ class RateLimiterMiddleware(BaseMiddleware):
     ) -> Any:
         """Intercepts updates to enforce frequency boundaries on interaction."""
         user: Optional[User] = data.get("event_from_user")
-        
-        # Bypass for system internal events or unauthenticated users
+
         if not user:
             return await handler(event, data)
 
@@ -53,7 +51,6 @@ class RateLimiterMiddleware(BaseMiddleware):
             limit_exceeded = await self._check_rate_limit(user.id)
             if limit_exceeded:
                 logger.warning(f"Rate limit exceeded for UID: {user.id}")
-                # Return None to silently drop excessive requests
                 return None
         except RedisError as fault:
             logger.error(f"Rate limiter subsystem fault: {fault}")
@@ -62,13 +59,22 @@ class RateLimiterMiddleware(BaseMiddleware):
         return await handler(event, data)
 
     async def _check_rate_limit(self, user_id: int) -> bool:
-        """Enforces a sliding window rate limit using atomic Redis operations."""
-        key = f"user:{user_id}"
-        
+        """Enforces a sliding window rate limit using atomic Redis operations.
+
+        BUG FIX: Original called `self._cache.client.pipeline(...)` directly.
+        `self._cache.client` is None until `connect()` is called. Fixed by
+        ensuring connection is established first.
+        """
+        key = self._cache._qualify_key(f"user:{user_id}")
+
+        # Ensure connection is alive before accessing raw client
+        if not self._cache.client:
+            await self._cache.connect()
+
         async with self._cache.client.pipeline(transaction=True) as pipe:
-            pipe.incr(self._cache._qualify_key(key))
-            pipe.expire(self._cache._qualify_key(key), RATE_LIMIT_WINDOW)
+            pipe.incr(key)
+            pipe.expire(key, RATE_LIMIT_WINDOW)
             results = await pipe.execute()
-        
+
         current_count = results[0]
         return current_count > REQUESTS_PER_MINUTE
