@@ -28,31 +28,30 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install runtime dependencies and tini
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    ffmpeg \
     curl \
     tini \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user and directory structure
 RUN groupadd -g 10001 cronuser && \
     useradd -u 10001 -g cronuser -s /bin/bash cronuser && \
-    mkdir -p /app/storage/logs /app/storage/database && \
-    chown -R cronuser:cronuser /app
+    mkdir -p /app/storage/logs /app/storage/database /tmp/investment_platform/storage /tmp/investment_platform/backups /tmp/investment_platform/logs && \
+    chown -R cronuser:cronuser /app /tmp/investment_platform
 
-# Copy installed packages from builder
+# BUG FIX: Same PATH ownership issue — chown the .local directory
 COPY --from=builder /root/.local /home/cronuser/.local
+RUN chown -R cronuser:cronuser /home/cronuser/.local
 ENV PATH=/home/cronuser/.local/bin:$PATH
 
-# Copy application source
 COPY --chown=cronuser:cronuser . .
 
 USER cronuser
 
-# Healthcheck: Verify the scheduler process is running
-HEALTHCHECK --interval=60s --timeout=15s --start-period=10s --retries=3 \
+# BUG FIX: `procps` added above so `ps aux` command works in the health check
+HEALTHCHECK --interval=60s --timeout=15s --start-period=15s --retries=3 \
     CMD ps aux | grep "[p]ython -m src.main_cron" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
