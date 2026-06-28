@@ -3,13 +3,16 @@
 Extends the generic base repository layer to implement highly optimized,
 index-aware asynchronous queries for the User model. Handles analytical aggregates,
 security telemetry updates, multi-layered referral lookups, and transactional account updates.
+
+BUG FIX: search_users method had parameter `Search_term` (capital S) but the body
+referenced `search_term` (lowercase), causing a NameError at runtime.
 """
 
 from datetime import datetime, UTC, timedelta
 import logging
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, desc, update, exc
@@ -84,11 +87,7 @@ class UserRepository(BaseRepository[User]):
     # --- Governance & Authentication States Matrix ---
 
     async def create_user(self, payload: dict[str, Any]) -> User:
-        """Registers a verified participant within the persistence layer engine.
-
-        Automatically ensures explicit fields mapping and establishes an 
-        associated blank Wallet model matrix inside a singular transaction unit.
-        """
+        """Registers a verified participant within the persistence layer engine."""
         try:
             user = User(**payload)
             self.session.add(user)
@@ -96,11 +95,11 @@ class UserRepository(BaseRepository[User]):
 
             wallet = Wallet(
                 user_id=user.telegram_id,
-                currency=payload.get("currency", "NGN")
+                currency=payload.get("currency", "NGN"),
             )
             self.session.add(wallet)
             await self.session.flush()
-            
+
             return user
         except exc.SQLAlchemyError as error:
             logger.error(f"Failed atomic user creation cycle: {error}")
@@ -113,11 +112,15 @@ class UserRepository(BaseRepository[User]):
 
     async def ban_user(self, telegram_id: int, status_reason: str = "BANNED") -> bool:
         """Applies a security lock down flag, denying platform access privileges."""
-        return await self.update_by_id(telegram_id, {"is_banned": True, "account_status": status_reason})
+        return await self.update_by_id(
+            telegram_id, {"is_banned": True, "account_status": status_reason}
+        )
 
     async def unban_user(self, telegram_id: int) -> bool:
         """Removes a security lock down flag, restoring structural platform access paths."""
-        return await self.update_by_id(telegram_id, {"is_banned": False, "account_status": "ACTIVE"})
+        return await self.update_by_id(
+            telegram_id, {"is_banned": False, "account_status": "ACTIVE"}
+        )
 
     async def activate_user(self, telegram_id: int) -> bool:
         """Sets the structural Boolean flag to bring an identity target state inline."""
@@ -129,9 +132,11 @@ class UserRepository(BaseRepository[User]):
 
     # --- Telemetry Interactivity Trackers ---
 
-    async def update_last_login(self, telegram_id: int, ip_address: str | None = None) -> bool:
+    async def update_last_login(
+        self, telegram_id: int, ip_address: Optional[str] = None
+    ) -> bool:
         """Records chronological login metadata strings alongside regional geolocation footprint vectors."""
-        payload = {"last_login": datetime.now(UTC)}
+        payload: dict[str, Any] = {"last_login": datetime.now(UTC)}
         if ip_address:
             payload["last_ip"] = ip_address
         return await self.update_by_id(telegram_id, payload)
@@ -142,11 +147,17 @@ class UserRepository(BaseRepository[User]):
 
     async def update_last_message(self, telegram_id: int, message_text: str) -> bool:
         """Saves incoming string payloads to provide analytical logging contexts on message reception."""
-        return await self.update_by_id(telegram_id, {"last_message": message_text[:4000], "last_activity": datetime.now(UTC)})
+        return await self.update_by_id(
+            telegram_id,
+            {"last_message": message_text[:4000], "last_activity": datetime.now(UTC)},
+        )
 
     async def update_last_callback(self, telegram_id: int, callback_data: str) -> bool:
         """Saves incoming query elements to provide analytical logging contexts on callback reception."""
-        return await self.update_by_id(telegram_id, {"last_callback": callback_data[:256], "last_activity": datetime.now(UTC)})
+        return await self.update_by_id(
+            telegram_id,
+            {"last_callback": callback_data[:256], "last_activity": datetime.now(UTC)},
+        )
 
     # --- Multi-Tenant System Metrics & Structural Aggregates ---
 
@@ -198,19 +209,25 @@ class UserRepository(BaseRepository[User]):
                 .where(User.telegram_id == telegram_id)
                 .values(
                     bonus_balance=User.bonus_balance + incremental_reward,
-                    total_referral_bonus=User.total_referral_bonus + incremental_reward
+                    total_referral_bonus=User.total_referral_bonus + incremental_reward,
                 )
             )
             result = await self.session.execute(statement)
             return (result.rowcount or 0) > 0
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed performance increment on referral rewards tracker {telegram_id}: {error}")
+            logger.error(
+                f"Failed performance increment on referral rewards tracker {telegram_id}: {error}"
+            )
             raise error
 
     async def get_referrals(self, telegram_id: int) -> Sequence[User]:
         """Exposes the immediate first-tier downstream array nodes tracking downline links."""
         try:
-            statement = select(User).where(User.referred_by == telegram_id).order_by(desc(User.created_at))
+            statement = (
+                select(User)
+                .where(User.referred_by == telegram_id)
+                .order_by(desc(User.created_at))
+            )
             result: Result = await self.session.execute(statement)
             return result.scalars().all()
         except exc.SQLAlchemyError as error:
@@ -226,11 +243,16 @@ class UserRepository(BaseRepository[User]):
             result: Result = await self.session.execute(statement)
             return result.scalar_or_none()
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed sub-graph mapping retrieval for user wallet {telegram_id}: {error}")
+            logger.error(
+                f"Failed sub-graph mapping retrieval for user wallet {telegram_id}: {error}"
+            )
             raise error
 
     async def update_wallet_balance(
-        self, telegram_id: int, available_delta: Decimal, bonus_delta: Decimal = Decimal("0.00")
+        self,
+        telegram_id: int,
+        available_delta: Decimal,
+        bonus_delta: Decimal = Decimal("0.00"),
     ) -> bool:
         """Modifies core cash allocations using multi-parameter tracking elements."""
         try:
@@ -239,53 +261,73 @@ class UserRepository(BaseRepository[User]):
                 .where(User.telegram_id == telegram_id)
                 .values(
                     wallet_balance=User.wallet_balance + available_delta,
-                    bonus_balance=User.bonus_balance + bonus_delta
+                    bonus_balance=User.bonus_balance + bonus_delta,
                 )
             )
             result = await self.session.execute(statement)
             return (result.rowcount or 0) > 0
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed transaction balance assignment on user table index {telegram_id}: {error}")
+            logger.error(
+                f"Failed transaction balance assignment on user table index {telegram_id}: {error}"
+            )
             raise error
 
     # --- Forensic Matrix Query Searching Functions ---
 
-    async def search_users(self, Search_term: str) -> Sequence[User]:
-        """Evaluates complex partial sub-string constraints matching text data records."""
+    async def search_users(self, search_term: str) -> Sequence[User]:
+        """Evaluates complex partial sub-string constraints matching text data records.
+
+        BUG FIX: Parameter was named `Search_term` (capital S) causing a NameError
+        when `search_term` (lowercase) was referenced inside the method body.
+        """
         try:
             sanitized = f"%{search_term.strip()}%"
-            statement = select(User).where(
-                or_(
-                    User.username.ilike(sanitized),
-                    User.full_name.ilike(sanitized),
-                    User.email.ilike(sanitized),
-                    User.phone.ilike(sanitized)
+            statement = (
+                select(User)
+                .where(
+                    or_(
+                        User.username.ilike(sanitized),
+                        User.full_name.ilike(sanitized),
+                        User.email.ilike(sanitized),
+                        User.phone.ilike(sanitized),
+                    )
                 )
-            ).order_by(desc(User.created_at))
+                .order_by(desc(User.created_at))
+            )
             result: Result = await self.session.execute(statement)
             return result.scalars().all()
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed complex string matrix parsing search on context: {search_term}: {error}")
+            logger.error(
+                f"Failed complex string matrix parsing search on context: {search_term}: {error}"
+            )
             raise error
 
     async def search_by_name(self, full_name_term: str) -> Sequence[User]:
         """Isolates search constraints exclusively to real-name identity tags."""
         try:
-            statement = select(User).where(User.full_name.ilike(f"%{full_name_term.strip()}%"))
+            statement = select(User).where(
+                User.full_name.ilike(f"%{full_name_term.strip()}%")
+            )
             result: Result = await self.session.execute(statement)
             return result.scalars().all()
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed pattern match query on name target {full_name_term}: {error}")
+            logger.error(
+                f"Failed pattern match query on name target {full_name_term}: {error}"
+            )
             raise error
 
     async def search_by_username(self, username_term: str) -> Sequence[User]:
         """Isolates search constraints exclusively to Telegram structural aliases."""
         try:
-            statement = select(User).where(User.username.ilike(f"%{username_term.strip().lstrip('@')}%"))
+            statement = select(User).where(
+                User.username.ilike(f"%{username_term.strip().lstrip('@')}%")
+            )
             result: Result = await self.session.execute(statement)
             return result.scalars().all()
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed pattern match query on username handle target {username_term}: {error}")
+            logger.error(
+                f"Failed pattern match query on username handle target {username_term}: {error}"
+            )
             raise error
 
     # --- Administrative Telemetry Functions ---
@@ -293,18 +335,24 @@ class UserRepository(BaseRepository[User]):
     async def latest_users(self, limit_count: int = 50) -> Sequence[User]:
         """Pulls a fixed window collection tracking the most recently registered profiles."""
         try:
-            statement = select(User).order_by(desc(User.created_at)).limit(limit_count)
+            statement = (
+                select(User).order_by(desc(User.created_at)).limit(limit_count)
+            )
             result: Result = await self.session.execute(statement)
             return result.scalars().all()
         except exc.SQLAlchemyError as error:
-            logger.error(f"Failed chronological profile pull limit context: {limit_count}: {error}")
+            logger.error(
+                f"Failed chronological profile pull limit context: {limit_count}: {error}"
+            )
             raise error
 
     async def users_registered_today(self) -> int:
         """Calculates total onboarding conversion volume for the current calendar date."""
         today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         try:
-            statement = select(func.count()).select_from(User).where(User.created_at >= today_start)
+            statement = select(func.count()).select_from(User).where(
+                User.created_at >= today_start
+            )
             result = await self.session.execute(statement)
             return int(result.scalar() or 0)
         except exc.SQLAlchemyError as error:
@@ -315,7 +363,9 @@ class UserRepository(BaseRepository[User]):
         """Calculates total onboarding conversion volume tracking back across 7 calendar days."""
         week_start = datetime.now(UTC) - timedelta(days=7)
         try:
-            statement = select(func.count()).select_from(User).where(User.created_at >= week_start)
+            statement = select(func.count()).select_from(User).where(
+                User.created_at >= week_start
+            )
             result = await self.session.execute(statement)
             return int(result.scalar() or 0)
         except exc.SQLAlchemyError as error:
@@ -326,7 +376,9 @@ class UserRepository(BaseRepository[User]):
         """Calculates total onboarding conversion volume tracking back across 30 calendar days."""
         month_start = datetime.now(UTC) - timedelta(days=30)
         try:
-            statement = select(func.count()).select_from(User).where(User.created_at >= month_start)
+            statement = select(func.count()).select_from(User).where(
+                User.created_at >= month_start
+            )
             result = await self.session.execute(statement)
             return int(result.scalar() or 0)
         except exc.SQLAlchemyError as error:
