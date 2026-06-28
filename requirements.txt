@@ -21,8 +21,16 @@ pyjwt>=2.10.1,<2.11.0
 # HTTP Client (Paystack & External API Integration)
 httpx>=0.28.1,<0.29.0
 
+# BUG FIX: aiohttp was missing. Required by src/main_bot.py for the health check
+# HTTP server that the bot.Dockerfile HEALTHCHECK pings on port 8080.
+aiohttp>=3.11.0,<3.12.0
+
 # Configuration Management
 python-dotenv>=1.0.1,<1.1.0
+
+# BUG FIX: pydantic was missing. Used extensively in config/base.py for all
+# settings classes (BotSettings, DatabaseSettings, RedisSettings, etc.)
+pydantic>=2.10.0,<3.0.0
 
 # Media Processing & Report Generation
 Pillow>=11.1.0,<11.2.0
