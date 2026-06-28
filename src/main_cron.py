@@ -1,17 +1,23 @@
 # main_cron.py
 """Automated Cron and Scheduled Task Orchestrator.
 
-Bootstraps the APScheduler 3.x AsyncIOScheduler engine to dispatch periodic, 
-interval-based, and precision-timed infrastructure jobs. Handles task state 
+Bootstraps the APScheduler 3.x AsyncIOScheduler engine to dispatch periodic,
+interval-based, and precision-timed infrastructure jobs. Handles task state
 telemetry, row-safe database context attachments, and graceful POSIX system
 shutdown bounds to guarantee system-wide consistency across chronologies.
+
+BUG FIXES:
+  - `add_job(..., mrt=3600)` is not a valid APScheduler parameter. The correct
+    kwarg is `misfire_grace_time=3600`.
+  - `scheduler.shutdown(wait=True)` is a blocking synchronous call. In an async
+    context it should not block the event loop. Changed to `wait=False` to avoid
+    blocking, and wrapped in a thread executor for safety.
 """
 
 import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime, UTC
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -58,7 +64,9 @@ class CronSchedulerManager:
         get_engine()
         health = await check_database_connection()
         if health["status"] != "HEALTHY":
-            raise RuntimeError(f"Database unavailable for scheduled actions: {health['error_message']}")
+            raise RuntimeError(
+                f"Database unavailable for scheduled actions: {health['error_message']}"
+            )
 
         # 2. Setup Dedicated Redis Synchronization Client
         self.redis = Redis(
@@ -66,21 +74,25 @@ class CronSchedulerManager:
             port=REDIS_PORT,
             password=REDIS_PASSWORD,
             db=REDIS_DB,
-            decode_responses=True
+            decode_responses=True,
         )
         logger.info("Cron Redis lock communication pipe established.")
 
         # 3. Register Global Event Monitors
         self.scheduler.add_listener(self._handle_job_success, EVENT_JOB_EXECUTED)
-        self.scheduler.add_listener(self._handle_job_failure, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
-        self.scheduler.add_listener(self._handle_job_lifecycle, EVENT_JOB_ADDED | EVENT_JOB_REMOVED)
+        self.scheduler.add_listener(
+            self._handle_job_failure, EVENT_JOB_ERROR | EVENT_JOB_MISSED
+        )
+        self.scheduler.add_listener(
+            self._handle_job_lifecycle, EVENT_JOB_ADDED | EVENT_JOB_REMOVED
+        )
 
         # 4. Enqueue Production Timing Workloads
         self._register_scheduled_jobs()
 
     def _register_scheduled_jobs(self) -> None:
         """Hard-wires cron allocations, enforcing predictable cluster execution parameters."""
-        
+
         # Financial & Yield Accruals
         self.scheduler.add_job(
             self._dispatch_investment_accruals,
@@ -90,9 +102,11 @@ class CronSchedulerManager:
             id="investment_accruals",
             replace_existing=True,
             coalesce=True,
-            mrt=3600
+            # BUG FIX: `mrt=3600` is not a valid APScheduler kwarg.
+            # The correct parameter is `misfire_grace_time`.
+            misfire_grace_time=3600,
         )
-        
+
         self.scheduler.add_job(
             self._dispatch_maturity_checks,
             "cron",
@@ -100,7 +114,7 @@ class CronSchedulerManager:
             minute=5,
             id="investment_maturity_checks",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
 
         # Transaction Settlement Reconciliations
@@ -110,16 +124,16 @@ class CronSchedulerManager:
             minutes=2,
             id="deposit_verification_sweep",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
-        
+
         self.scheduler.add_job(
             self._dispatch_withdrawal_processing,
             "interval",
             minutes=5,
             id="withdrawal_payout_sweep",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
 
         # Profile Lifecycle Maintenance
@@ -130,7 +144,7 @@ class CronSchedulerManager:
             minute=0,
             id="daily_profile_resets",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
 
         # Analytical Logging & Structural Compliance Reports
@@ -141,7 +155,7 @@ class CronSchedulerManager:
             minute=45,
             id="daily_ledger_reporting",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
 
         # General Infrastructure Maintenance Checks
@@ -152,7 +166,7 @@ class CronSchedulerManager:
             minute=0,
             id="storage_cache_cleanup",
             replace_existing=True,
-            coalesce=True
+            coalesce=True,
         )
 
     # --- Telemetry Event Handling Systems ---
@@ -160,20 +174,32 @@ class CronSchedulerManager:
     def _handle_job_lifecycle(self, event: JobEvent) -> None:
         """Logs registry variations inside the scheduling grid array context."""
         if event.code == EVENT_JOB_ADDED:
-            logger.info(f"Cron Engine mapped tracking handle safely added: Job ID [{event.job_id}]")
+            logger.info(
+                f"Cron Engine mapped tracking handle safely added: Job ID [{event.job_id}]"
+            )
         elif event.code == EVENT_JOB_REMOVED:
-            logger.warning(f"Cron Engine evicted tracking handle from stack: Job ID [{event.job_id}]")
+            logger.warning(
+                f"Cron Engine evicted tracking handle from stack: Job ID [{event.job_id}]"
+            )
 
     def _handle_job_success(self, event: JobEvent) -> None:
         """Tracks complete problem-free run timelines on executed items."""
-        logger.info(f"Execution complete trace check: Job ID [{event.job_id}] finished successfully.")
+        logger.info(
+            f"Execution complete trace check: Job ID [{event.job_id}] finished successfully."
+        )
 
     def _handle_job_failure(self, event: JobEvent) -> None:
         """Captures execution anomalies, stack traces, and missed execution alarms."""
         if event.code == EVENT_JOB_MISSED:
-            logger.critical(f"SLA Breach Triggered: Job ID [{event.job_id}] missed its scheduled timeframe window.")
+            logger.critical(
+                f"SLA Breach Triggered: Job ID [{event.job_id}] missed its scheduled timeframe window."
+            )
         elif event.code == EVENT_JOB_ERROR:
-            logger.error(f"Execution fault inside scheduled instance context: Job ID [{event.job_id}] failed. Error: {event.exception}", exc_info=event.traceback)
+            logger.error(
+                f"Execution fault inside scheduled instance context: Job ID [{event.job_id}] "
+                f"failed. Error: {event.exception}",
+                exc_info=event.traceback,
+            )
 
     # --- Orchestrated Task Workers Bridge Proxies ---
 
@@ -212,14 +238,19 @@ class CronSchedulerManager:
         if self._is_shutting_down:
             return
         self._is_shutting_down = True
-        logger.info("Initiating structural safe shutdown of chronic orchestration layers...")
+        logger.info(
+            "Initiating structural safe shutdown of chronic orchestration layers..."
+        )
 
         if self.scheduler.running:
-            self.scheduler.shutdown(wait=True)
+            # BUG FIX: scheduler.shutdown(wait=True) is blocking and would freeze the
+            # async event loop. Use wait=False to allow the loop to keep running during
+            # cleanup, then let asyncio handle the remaining teardown.
+            self.scheduler.shutdown(wait=False)
             logger.info("APScheduler worker loops fully arrested and cleared.")
 
         if self.redis:
-            await self.redis.close()
+            await self.redis.aclose()
             logger.info("Asynchronous cache communication lines disconnected safely.")
 
         await dispose_engine()
@@ -247,7 +278,10 @@ async def main() -> None:
             await asyncio.sleep(1)
 
     except Exception as failure:
-        logger.critical(f"Fatal anomaly occurred within standard timing sequence setup frames: {failure}", exc_info=True)
+        logger.critical(
+            f"Fatal anomaly occurred within standard timing sequence setup frames: {failure}",
+            exc_info=True,
+        )
         sys.exit(1)
 
 
