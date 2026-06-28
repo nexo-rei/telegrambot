@@ -1,14 +1,10 @@
-"""Referral System Data Transfer Objects."""
-
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-
 @dataclass
 class ReferralStatsDTO:
-    """Referral performance statistics transfer object."""
-    user_id: int
+    user_id: int = 0
     total_referrals: int = 0
     active_referrals: int = 0
     total_earnings: Decimal = Decimal("0.00")
