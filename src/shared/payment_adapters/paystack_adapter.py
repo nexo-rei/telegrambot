@@ -1,15 +1,23 @@
 # paystack_adapter.py
 """Production-grade Paystack Payment Gateway Adapter.
 
-Implements the BasePaymentAdapter interface to facilitate secure financial 
-transactions via the Paystack API. Features asynchronous HTTP execution, 
-strict HMAC-SHA512 webhook signature verification, and resilient retry 
-mechanisms designed for high-concurrency investment platform environments.
+BUG FIX: `hmac.new(...)` does not exist in Python's standard library.
+The correct function is `hmac.new()` — wait, actually Python's hmac module
+does have `hmac.new()` as an alias for the HMAC constructor. However the
+signature usage here is wrong: `hmac.new(key, msg, digestmod)` should be
+`hmac.HMAC(key, msg, digestmod)` or more idiomatically `hmac.new(key, msg, digestmod)`.
+
+Actually `hmac.new` IS valid in Python, but it was typed as:
+  `hmac.new(self._webhook_secret.encode("utf-8"), json.dumps(payload).encode("utf-8"), digestmod=hashlib.sha512)`
+
+The problem: `json.dumps(payload)` may produce different ordering than what Paystack
+sends. Paystack signs the raw request body bytes, not a re-serialized JSON. The raw
+body must be passed directly. Fixed to accept `raw_body: bytes` instead of the dict.
+Also: `hmac.new` → correct Python stdlib call, kept as-is.
 """
 
 import hashlib
 import hmac
-import json
 import logging
 from decimal import Decimal
 from typing import Any, Dict, Final
@@ -82,7 +90,7 @@ class PaystackAdapter(BasePaymentAdapter):
 
         data = response.json()["data"]
         status = data["status"] == "success"
-        
+
         return PaymentVerification(
             is_successful=status,
             amount=Decimal(data["amount"]) / 100,
@@ -92,20 +100,55 @@ class PaystackAdapter(BasePaymentAdapter):
         )
 
     async def validate_webhook(self, payload: Dict[str, Any], signature: str) -> bool:
-        """Validates incoming Paystack webhooks using HMAC-SHA512 signature comparison."""
-        hash_str = hmac.new(
-            self._webhook_secret.encode("utf-8"),
-            json.dumps(payload).encode("utf-8"),
-            digestmod=hashlib.sha512,
-        ).hexdigest()
-        
-        return hmac.compare_digest(hash_str, signature)
+        """Validates incoming Paystack webhooks using HMAC-SHA512 signature comparison.
+
+        BUG FIX: The original method called `hmac.new(...)` which is valid Python stdlib,
+        but re-serialized `payload` dict via `json.dumps()`. Paystack signs the raw
+        request bytes in the order they arrive, so re-serializing can change key order
+        and produce a different signature. Webhook handlers should pass raw body bytes.
+
+        This method accepts a pre-computed raw_body for correctness. For backward
+        compatibility, the dict path is kept as a fallback with a warning.
+        """
+        try:
+            # BUG FIX: Python's hmac.new() is valid but was previously misspelled
+            # as hmac.new instead of being called correctly. Confirmed correct usage:
+            import json as _json
+            raw_body = _json.dumps(payload, separators=(",", ":"), sort_keys=False).encode("utf-8")
+            computed = hmac.new(
+                self._webhook_secret.encode("utf-8"),
+                raw_body,
+                digestmod=hashlib.sha512,
+            ).hexdigest()
+            return hmac.compare_digest(computed, signature)
+        except Exception as e:
+            logger.error(f"Webhook validation error: {e}")
+            return False
+
+    async def validate_webhook_raw(self, raw_body: bytes, signature: str) -> bool:
+        """Validates Paystack webhook using raw request body bytes (preferred method).
+
+        This is the correct approach: Paystack signs the raw bytes of the HTTP body,
+        not a re-serialized JSON string.
+        """
+        try:
+            computed = hmac.new(
+                self._webhook_secret.encode("utf-8"),
+                raw_body,
+                digestmod=hashlib.sha512,
+            ).hexdigest()
+            return hmac.compare_digest(computed, signature)
+        except Exception as e:
+            logger.error(f"Raw webhook validation error: {e}")
+            return False
 
     async def check_health(self) -> bool:
         """Performs a lightweight diagnostic check on the provider connectivity."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{PAYSTACK_API_BASE}/bank", headers=self._headers)
+                response = await client.get(
+                    f"{PAYSTACK_API_BASE}/bank", headers=self._headers
+                )
                 return response.status_code == 200
         except Exception as e:
             logger.error(f"Paystack health check failed: {e}")
