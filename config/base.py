@@ -7,7 +7,7 @@ safeguards to ensure fail-fast behaviors on invalid structural configurations.
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from dotenv import load_dotenv
 
@@ -19,7 +19,7 @@ class BotSettings(BaseModel):
     """Encapsulates Telegram bot identity and communication hooks."""
     TOKEN: str = Field(..., alias="BOT_TOKEN")
     USERNAME: str = Field(..., alias="BOT_USERNAME")
-    WEBHOOK_URL: str | None = Field(default=None, alias="WEBHOOK_URL")
+    WEBHOOK_URL: Optional[str] = Field(default=None, alias="WEBHOOK_URL")
 
     @field_validator("TOKEN")
     @classmethod
@@ -51,7 +51,7 @@ class RedisSettings(BaseModel):
     """Controls parameters for state tracking caches and distributed buses."""
     HOST: str = Field(..., alias="REDIS_HOST")
     PORT: int = Field(default=6379, alias="REDIS_PORT")
-    PASSWORD: str | None = Field(default=None, alias="REDIS_PASSWORD")
+    PASSWORD: Optional[str] = Field(default=None, alias="REDIS_PASSWORD")
     DB: int = Field(default=0, alias="REDIS_DB")
 
 
@@ -93,7 +93,9 @@ class SchedulerSettings(BaseModel):
 class LoggingSettings(BaseModel):
     """System-wide trace parameters tracking standard storage streams."""
     LEVEL: str = Field(default="INFO", alias="LOG_LEVEL")
-    PATH: Path = Field(..., alias="LOG_PATH")
+    # BUG FIX: LOG_PATH was required (Field(...)) which causes a crash in Railway/Docker
+    # environments that don't set this variable. Made optional with a sensible default.
+    PATH: Path = Field(default=Path("/tmp/investment_platform/logs"), alias="LOG_PATH")
 
     @field_validator("PATH", mode="before")
     @classmethod
@@ -103,13 +105,26 @@ class LoggingSettings(BaseModel):
 
 class StorageSettings(BaseModel):
     """Defines isolated structural runtime storage block directory mappings."""
-    STORAGE_PATH: Path = Field(..., alias="STORAGE_PATH")
-    BACKUP_PATH: Path = Field(..., alias="BACKUP_PATH")
+    # BUG FIX: STORAGE_PATH and BACKUP_PATH were required fields (Field(...)).
+    # In Railway, these env vars are not set, causing crash at import time.
+    # Defaulted to writable /tmp paths for Railway compatibility.
+    STORAGE_PATH: Path = Field(default=Path("/tmp/investment_platform/storage"), alias="STORAGE_PATH")
+    BACKUP_PATH: Path = Field(default=Path("/tmp/investment_platform/backups"), alias="BACKUP_PATH")
+
+    @field_validator("STORAGE_PATH", "BACKUP_PATH", mode="before")
+    @classmethod
+    def cast_path(cls, v: Any) -> Path:
+        return Path(v)
 
     @model_validator(mode="after")
     def provision_directories(self) -> "StorageSettings":
-        self.STORAGE_PATH.mkdir(parents=True, exist_ok=True)
-        self.BACKUP_PATH.mkdir(parents=True, exist_ok=True)
+        # BUG FIX: Original code called mkdir at import time without try/except.
+        # In read-only filesystems this would crash the entire application startup.
+        try:
+            self.STORAGE_PATH.mkdir(parents=True, exist_ok=True)
+            self.BACKUP_PATH.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # Non-fatal: log directories may be managed externally
         return self
 
 
@@ -165,7 +180,7 @@ def load_settings_from_env() -> ApplicationSettings:
     except ValidationError as error:
         import sys
         sys.stderr.write(f"[CRITICAL_CONFIG_ERROR] Environmental schema mismatch:\n{error}\n")
-        raise RuntimeError("Fatal system initialization initialization trace failure.") from error
+        raise RuntimeError("Fatal system initialization trace failure.") from error
 
 
 # Global single instance instantiation pattern
