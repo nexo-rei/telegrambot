@@ -53,7 +53,9 @@ def get_engine() -> AsyncEngine:
             logger.info("Asynchronous database engine initialized successfully.")
         except Exception as error:
             sys.stderr.write(f"[CRITICAL_DATABASE_INIT_FAILURE] {error}\n")
-            logger.critical("Failed to build connection pool engine runtime abstraction.", exc_info=True)
+            logger.critical(
+                "Failed to build connection pool engine runtime abstraction.", exc_info=True
+            )
             raise RuntimeError("Database engine subsystem initialization failure.") from error
 
     return _async_engine
@@ -71,8 +73,10 @@ async def dispose_engine() -> None:
         try:
             await _async_engine.dispose()
             logger.info("Database connection pool flushed and closed successfully.")
-        except Exception as error:
-            logger.error("Error encountered during database engine pool disposal mapping.", exc_info=True)
+        except Exception:
+            logger.error(
+                "Error encountered during database engine pool disposal mapping.", exc_info=True
+            )
         finally:
             _async_engine = None
 
@@ -87,23 +91,22 @@ async def check_database_connection() -> Dict[str, Any]:
     diagnostic_payload: Dict[str, Any] = {
         "status": "UNHEALTHY",
         "latency_verified": False,
-        "error_message": None
+        "error_message": None,
     }
 
     try:
-        # Utilize async session context abstraction explicitly for execution checking
         async with current_engine.connect() as connection:
-            # Execute an optimistic low-overhead baseline operational test query
             await connection.execute(text("SELECT 1;"))
-            
+
         diagnostic_payload["status"] = "HEALTHY"
         diagnostic_payload["latency_verified"] = True
     except exc.SQLAlchemyError as db_error:
         logger.error("Database connection health-check verification failed.", exc_info=True)
         diagnostic_payload["error_message"] = str(db_error)
     except Exception as generic_error:
-        logger.critical("Unexpected exception intercepted during infrastructure health-check.", exc_info=True)
+        logger.critical(
+            "Unexpected exception intercepted during infrastructure health-check.", exc_info=True
+        )
         diagnostic_payload["error_message"] = str(generic_error)
 
     return diagnostic_payload
-    
