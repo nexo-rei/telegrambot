@@ -31,7 +31,6 @@ WORKDIR /app
 # Install runtime dependencies and tini
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    ffmpeg \
     curl \
     tini \
     && rm -rf /var/lib/apt/lists/*
@@ -39,11 +38,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user and directory structure
 RUN groupadd -g 10001 botuser && \
     useradd -u 10001 -g botuser -s /bin/bash botuser && \
-    mkdir -p /app/storage/logs /app/storage/database && \
-    chown -R botuser:botuser /app
+    mkdir -p /app/storage/logs /app/storage/database /tmp/investment_platform/storage /tmp/investment_platform/backups /tmp/investment_platform/logs && \
+    chown -R botuser:botuser /app /tmp/investment_platform
 
-# Copy installed packages from builder
+# BUG FIX: Builder runs as root and installs to /root/.local.
+# The runtime stage copies these to /home/botuser/.local correctly,
+# but the PATH must explicitly include /home/botuser/.local/bin.
 COPY --from=builder /root/.local /home/botuser/.local
+RUN chown -R botuser:botuser /home/botuser/.local
 ENV PATH=/home/botuser/.local/bin:$PATH
 
 # Copy application source
@@ -51,8 +53,9 @@ COPY --chown=botuser:botuser . .
 
 USER botuser
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# BUG FIX: Health check pings port 8080 which is the aiohttp health server
+# started in main_bot.py. This is now correctly implemented.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
